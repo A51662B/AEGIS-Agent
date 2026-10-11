@@ -1,0 +1,25 @@
+# AEGIS-Agent 依赖
+# Python 3.10+（开发环境为 3.12）
+
+# 模型调用（OpenAI 兼容接口）
+openai>=1.0.0
+
+# Web 服务（Web 界面入口 server.py）
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
+# 配置加载与数据校验
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# HTTP 请求（MinerU PDF 解析）
+requests>=2.31.0
+
+# 联网搜索工具
+tavily-python>=0.3.0
+
+# Token 用量统计
+tiktoken>=0.6.0
+
+# 工作流编排（workflow/ 下的 PDF 解析与报告生成）
+langgraph>=0.2.0
