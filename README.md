@@ -35,7 +35,7 @@
 
 ### 子代理
 
-复杂任务可以开子代理并行推进，结果通过消息队列回传给主代理。
+复杂任务可以开子代理并行推进。
 
 ---
 
@@ -73,8 +73,7 @@ TAVILY_API_KEY=
 # 用 PDF 解析 / 报告工作流时需要
 MINERU_API_TOKEN=
 
-# 可选：显式指定上下文窗口大小（token），用于用量统计
-CONTEXT_WINDOW=
+
 ```
 
 | 变量 | 必填 | 说明 |
@@ -86,7 +85,6 @@ CONTEXT_WINDOW=
 | `TITLE_MODEL` | | 会话标题模型，缺省回落到 `CHAT_MODEL` |
 | `TAVILY_API_KEY` | | 联网搜索（Tavily） |
 | `MINERU_API_TOKEN` | | PDF 解析（MinerU Standard API） |
-| `CONTEXT_WINDOW` | | 上下文窗口大小，用于 token 用量统计 |
 
 ### 运行
 
