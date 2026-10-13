@@ -4,10 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AEGIS</title>
+  <!-- Google Fonts 在国内不可达（实测连不上，超时 15s+），而且 <link rel=stylesheet> 会阻塞渲染，
+       导致整页卡十几秒。已停用，字体回退到 style.css 里的系统字体栈。
+       以后想恢复：换国内镜像，或把 woff2 下到 static/vendor/fonts/ 用本地 @font-face。
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=20261011t" />
+  -->
+
+  <link rel="stylesheet" href="/static/style.css?v=20261013a" />
 </head>
 <body>
   <div class="app">
@@ -59,6 +64,9 @@
     <!-- 右侧：工作台 -->
     <aside class="workbench">
       <div class="wb-header">工作台</div>
+      <div class="subagent-panel" id="subagent-panel" hidden>
+        <div class="sa-title">子代理</div>
+      </div>
       <div class="wb-body" id="wb-body">
         <div class="wb-empty">工具调用将在这里实时显示</div>
       </div>
@@ -66,6 +74,6 @@
   </div>
 
   <script src="/static/vendor/marked.min.js"></script>
-  <script src="/static/app.js?v=20261011t"></script>
+  <script src="/static/app.js?v=20261013a"></script>
 </body>
 </html>

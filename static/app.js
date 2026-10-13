@@ -5,6 +5,7 @@ const $ = (sel) => document.querySelector(sel);
 const chatScroll = $('#chat-scroll');
 const sessionList = $('#session-list');
 const wbBody = $('#wb-body');
+const saPanel = $('#subagent-panel');
 const input = $('#input');
 const sendBtn = $('#send');
 const emptyState = $('#empty-state');
@@ -345,6 +346,91 @@ function finishWbItem(item, content, ok = true) {
   wbBody.scrollTop = wbBody.scrollHeight;
 }
 
+/* ===== 子代理面板 =====
+   后端状态表是全局的；sid 形如 "<session_id>:<uuid>"，所以按前缀过滤出当前会话的。
+   用轮询而不是 SSE：主循环等子代理时会卡在 await q.get()，SSE 流是静默的，推不出状态。 */
+const saCards = new Map();   // sid -> 卡片 DOM（按 id 增量更新，避免全量重写导致闪烁）
+let saPolling = false;       // 防止请求重叠堆积
+
+const SA_STATUS_TEXT = { running: '运行中', done: '完成', failed: '失败', cancelled: '已取消' };
+
+function saCreateCard(sid) {
+  const card = el('div', 'sa-card');
+  const head = el('div', 'sa-head');
+  head.appendChild(el('span', 'sa-dot'));
+  head.appendChild(el('span', 'sa-label'));
+  head.appendChild(el('span', 'sa-status'));
+  card.appendChild(head);
+  const bar = el('div', 'sa-bar');
+  bar.appendChild(el('div', 'sa-bar-fill'));
+  card.appendChild(bar);
+  card.appendChild(el('div', 'sa-meta'));
+  card.appendChild(el('div', 'sa-tool'));
+  card.appendChild(el('div', 'sa-text'));
+  saCards.set(sid, card);
+  return card;
+}
+
+function saUpdateCard(card, st) {
+  const status = st.status || 'running';
+  card.className = 'sa-card sa-' + status;
+
+  card.querySelector('.sa-label').textContent =
+    (st.label || st.id || '').trim() || '(未命名子任务)';
+  card.querySelector('.sa-status').textContent = SA_STATUS_TEXT[status] || status;
+
+  const cur = st.round || 0;
+  const max = st.max_rounds || 0;
+  card.querySelector('.sa-bar-fill').style.width =
+    (max > 0 ? Math.min(100, Math.round((cur / max) * 100)) : 0) + '%';
+
+  // updated_at 目前不会在 update() 里刷新，所以结束后的总耗时不可信 —— 只对运行中显示
+  let meta = cur + '/' + max + ' 轮';
+  if (status === 'running' && st.started_at) {
+    meta += ' · ' + Math.max(0, Math.round(Date.now() / 1000 - st.started_at)) + 's';
+  }
+  card.querySelector('.sa-meta').textContent = meta;
+
+  card.querySelector('.sa-tool').textContent = st.last_tool ? '正在调用 ' + st.last_tool : '';
+  card.querySelector('.sa-text').textContent = (st.last_text || '').trim();
+}
+
+function renderSubagents(list) {
+  const mine = (list || []).filter((s) => {
+    const sid = String(s.id || '');
+    const i = sid.indexOf(':');
+    return (i >= 0 ? sid.slice(0, i) : sid) === currentSession;
+  });
+
+  // 清掉已经不在快照里的卡片（含切换会话后属于别的会话的）
+  const alive = new Set(mine.map((s) => s.id));
+  saCards.forEach((card, sid) => {
+    if (!alive.has(sid)) { card.remove(); saCards.delete(sid); }
+  });
+
+  if (mine.length === 0) { saPanel.hidden = true; return; }
+  saPanel.hidden = false;
+
+  mine.forEach((st) => {
+    const card = saCards.get(st.id) || saCreateCard(st.id);
+    if (!card.parentNode) saPanel.appendChild(card);
+    saUpdateCard(card, st);
+  });
+}
+
+async function pollSubagents() {
+  if (saPolling) return;                 // 上一轮还没回来就跳过
+  saPolling = true;
+  try {
+    const res = await fetch('/api/subagents');
+    if (res.ok) renderSubagents(await res.json());
+  } catch (e) {
+    /* 轮询失败静默忽略，下一秒会重试 */
+  } finally {
+    saPolling = false;
+  }
+}
+
 /* ===== 发送与流式接收 ===== */
 async function send() {
   const text = input.value.trim();
@@ -645,5 +731,9 @@ $('#new-session').addEventListener('click', () => {
   loadSessions();
   updateTokenUsage();
 });
+
+// 子代理面板：每秒轮询一次状态快照
+setInterval(pollSubagents, 1000);
+pollSubagents();
 
 loadSessions();

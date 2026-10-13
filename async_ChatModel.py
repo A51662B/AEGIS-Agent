@@ -4,10 +4,11 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI, AsyncOpenAI
 from Message import messageProcess
+from tools import subAgent
 from tools.Toolregistry import *
 from SubAgentMessageQueue import *
 from session_context import current_session
-from config import chat_model
+from utils.subagent_state import subAgentState
 load_dotenv()
 
 _client = None
@@ -37,6 +38,7 @@ tools = toolregistry.getToolDescription()
 func = toolregistry.getToolMap()
 
 class ToolProxy:
+    # 同步工作流工具 -> 前端占位提示（后台 to_thread 执行，结果进队列 q）
     WORKFLOW_TOOLS = {
         "reportWorkflow": "论文报告编写工作流正在运行",
         "pdfToMarkdown": "PDF 转 Markdown 工作流正在运行",
@@ -46,12 +48,23 @@ class ToolProxy:
         self.func = funcs
         self._tasks = set()
 
+    def _harvest_terminal_state(self, t:asyncio.Task):
+        sid = getattr(t, "_subagent_id", None)
+        if t.cancelled():
+            subAgentState.update(sid,finish="cancelled")
+            return
+        elif t.exception() is not None:
+            subAgentState.update(sid,finish="failed")
+        else:
+            subAgentState.update(sid,finish="done")
+
     def _spawn(self, coro):
         """创建后台 task 并标记所属会话，完成后自动从 _tasks 清理（防内存泄漏）。"""
         task = asyncio.create_task(coro)
         task._session_id = current_session.get()
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._harvest_terminal_state)
         return task
 
     def cancel_session_tasks(self, session_id):
@@ -104,6 +117,7 @@ class ToolProxy:
         except Exception as e:
             # 关键：异常也必须 q.put 回队列，否则主循环 await q.get() 会永远卡住
             await q.put(f"子代理执行出错: {e}")
+            raise
 
     async def workflowExecutor(self, toolName: str, params: dict):
         # 同步工作流（reportWorkflow / pdfToMarkdown 等）在后台 task 里用 to_thread 跑，
@@ -118,9 +132,9 @@ class ToolProxy:
 
 
 class ChatModel:
-    def __init__(self, model=None, max_completion_tokens=1024, temperature=1.0,
+    def __init__(self, model="deepseek-flash", max_completion_tokens=1024, temperature=1.0,
                  top_p=0.95, frequency_penalty=0, stop=None, presence_penalty=0, tools=tools):
-        self.model = model or chat_model()
+        self.model = model
         self.max_completion_tokens = max_completion_tokens
         self.temperature = temperature
         self.top_p = top_p
@@ -225,6 +239,5 @@ class ChatModel:
             extra_body={"thinking": {"type": "enabled"}}
         )
         return stream
-
 
 

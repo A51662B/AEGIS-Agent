@@ -573,3 +573,75 @@ html, body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+
+/* ===== 子代理面板（工作台顶部）===== */
+.subagent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 42%;
+  overflow-y: auto;
+}
+/* 必须显式写：上面的 display:flex 会覆盖 [hidden] 默认的 display:none */
+.subagent-panel[hidden] { display: none; }
+
+.sa-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  padding: 0 4px;
+}
+
+.sa-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fadeUp 0.2s ease;
+}
+
+.sa-head { display: flex; align-items: center; gap: 7px; }
+.sa-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-tertiary); flex: none;
+}
+.sa-label {
+  flex: 1; min-width: 0;
+  font-size: 12px; font-weight: 500; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sa-status { font-size: 11px; color: var(--text-secondary); flex: none; }
+
+.sa-bar { height: 3px; border-radius: 2px; background: var(--accent-soft); overflow: hidden; }
+.sa-bar-fill {
+  height: 100%; width: 0; border-radius: 2px;
+  background: var(--text-tertiary); transition: width 0.3s ease;
+}
+
+.sa-meta { font-size: 11px; color: var(--text-tertiary); }
+.sa-tool { font-size: 11px; color: #0071e3; }
+.sa-text {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sa-tool:empty, .sa-text:empty { display: none; }
+
+/* 状态配色，沿用工作台里已有的三色 */
+.sa-card.sa-running .sa-dot { background: var(--amber); animation: sa-pulse 1.1s ease-in-out infinite; }
+.sa-card.sa-running .sa-bar-fill { background: var(--amber); }
+.sa-card.sa-done .sa-dot { background: var(--green); }
+.sa-card.sa-done .sa-bar-fill { background: var(--green); }
+.sa-card.sa-failed .sa-dot { background: #ff3b30; }
+.sa-card.sa-failed .sa-bar-fill { background: #ff3b30; }
+.sa-card.sa-cancelled .sa-dot { background: var(--text-tertiary); }
+.sa-card.sa-cancelled .sa-label { color: var(--text-tertiary); }
+
+@keyframes sa-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+

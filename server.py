@@ -16,7 +16,7 @@ from session_context import current_session
 from utils.title_generator import generate_and_save_title
 from utils.render_list import load_all_messages
 from utils.token_counter import get_usage
-from config import chat_model
+from utils.subagent_state import subAgentState
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -64,9 +64,9 @@ async def _agent_stream(session_id: str):
     completed = False
     try:
         memory = get_memory(session_id)
-        cp = memory.checkpoint()  
+        cp = memory.checkpoint()  # user 消息已 append，记录干净快照（供中断回滚）
         model = ChatModel()
-        model.setSystemPrompt(MAIN_SYSTEM_PROMPT)  
+        model.setSystemPrompt(MAIN_SYSTEM_PROMPT)  # 主 agent 系统提示词（不落盘）
     
         max_rounds = 30
         for _round in range(max_rounds):
@@ -74,7 +74,7 @@ async def _agent_stream(session_id: str):
     
             content_parts = []
             reasoning_parts = []
-            tool_calls = {}  
+            tool_calls = {}  # index -> {"id","name","arguments"}
             role = None
             finish_reason = None
     
@@ -113,6 +113,7 @@ async def _agent_stream(session_id: str):
             content = "".join(content_parts)
             reasoning = "".join(reasoning_parts)
     
+            # 统一把 tool_calls 转成标准格式（有则转换，无则 None）
             std_tool_calls = None
             if tool_calls:
                 ordered = [tool_calls[i] for i in sorted(tool_calls.keys())]
@@ -125,6 +126,7 @@ async def _agent_stream(session_id: str):
                     for tc in ordered
                 ]
     
+            # 构造完整原始记录（对齐非流式 AssistantMessage 里 message.model_dump() 的语义，供审计）
             rowmessage = {
                 "role": role or "assistant",
                 "content": content,
@@ -136,7 +138,7 @@ async def _agent_stream(session_id: str):
             if tool_calls:
                 memory.append(AssistantMessageFromParts(content, std_tool_calls, reasoning, rowmessage))
     
-                
+                # 逐个推送 tool_call + 执行工具 + 推送 tool_result（串行，前端逐个显示，而非一次性全部冒出）
                 for tc in ordered:
                     name = tc["name"]
                     try:
@@ -181,10 +183,13 @@ async def _agent_stream(session_id: str):
     
     
     finally:
-        
+        # 中断/异常：回滚这一轮产生的所有消息（内存截断 + 磁盘 truncate），保证下次调用消息链干净
         if not completed and memory is not None and cp is not None:
             memory.rollback(cp)
+            # 回滚后追加一条用户消息，明确告知模型"已中断，重新接收指令"，
+            # 避免模型看到上一条仍是"调用工具"的指令，下次又接着调工具
             memory.append(UserMessage("用户手动中断了之前的操作，之前未完成的回复和工具调用已作废，请忽略它们，等待用户重新下达指令。"))
+        # 取消本会话后台任务（子代理/工作流），清空队列计数
         toolProxy.cancel_session_tasks(session_id)
         current_session.reset(token)
 
@@ -202,11 +207,11 @@ async def chat(request: Request):
     is_first_message = len(memory.messageList) == 0
     memory.append(UserMessage(message))
 
-
+    # 第一次对话：后台异步生成会话标题（不阻塞对话流）
     if is_first_message:
         asyncio.create_task(generate_and_save_title(session_id, message))
 
-  
+    # 用队列桥接：把 _agent_stream 包进 task（便于中断 cancel），产出经队列流式送给前端
     output_q = asyncio.Queue()
 
     async def runner():
@@ -214,7 +219,7 @@ async def chat(request: Request):
             async for ev in _agent_stream(session_id):
                 await output_q.put(ev)
         finally:
-            output_q.put_nowait(None)  
+            output_q.put_nowait(None)  # 结束哨兵（用 put_nowait，避免 cancel 后 await 卡住）
 
     task = asyncio.create_task(runner())
     _active_tasks[session_id] = task
@@ -245,7 +250,7 @@ async def stop_chat(session_id: str):
     if task and not task.done():
         task.cancel()
         try:
-            await task  
+            await task  # 等 task 结束（finally 里已完成回滚），保证接口返回时状态已回滚
         except BaseException:
             pass
     toolProxy.cancel_session_tasks(session_id)
@@ -259,7 +264,7 @@ async def list_sessions():
 
 @app.delete("/api/session/{session_id}")
 async def delete_session(session_id: str):
-   
+    # 清理内存缓存，避免拿到已删除会话的旧对象
     with _sessions_lock:
         _sessions.pop(session_id, None)
     deleted = session_store.delete_session(session_id)
@@ -293,8 +298,8 @@ async def get_all_messages(session_id: str):
     return _serialize_messages(load_all_messages(memory.memory_file))
 
 
-
-MODEL_NAME = chat_model()
+# 主对话模型（与 ChatModel 默认一致），token 统计用
+MODEL_NAME = "deepseek-v4.1-flash"
 
 
 @app.get("/api/token-usage/{session_id}")
@@ -310,13 +315,19 @@ async def compact_session(session_id: str, request: Request):
     rate = body.get("rate", 0.5)
     memory = get_memory(session_id)
     before = get_usage(memory.messageList, MODEL_NAME)
-   
+    # compact 内部同步调 LLM 生成摘要，丢线程池避免阻塞事件循环
     try:
         await asyncio.to_thread(memory.compact, mode, rate)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"压缩失败: {e}"}, status_code=500)
     after = get_usage(memory.messageList, MODEL_NAME)
     return {"ok": True, "before": before, "after": after}
+
+
+@app.get("/api/subagents")
+async def list_subagents():
+    """子代理状态快照（前端每秒轮询一次用于可视化）"""
+    return subAgentState.snapshot()
 
 
 @app.get("/")
