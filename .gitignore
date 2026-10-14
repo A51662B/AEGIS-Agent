@@ -21,3 +21,5 @@ memory.txt
 
 # 论文原文与运行时工作区（体积大、非源码，运行时自动创建）
 workspace/
+
+.vscode/
