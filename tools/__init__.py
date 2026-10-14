@@ -6,3 +6,4 @@ from tools.reportworkflow import reportWorkflow
 from tools.pdftomarkdown import pdfToMarkdown
 from tools.split_paper import splitPaper
 from tools.skilltool import skilltool
+from tools.run_bash import run_bash
