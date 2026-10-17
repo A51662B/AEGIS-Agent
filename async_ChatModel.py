@@ -99,6 +99,12 @@ class ToolProxy:
             except Exception as e:
                 return f"工作流启动失败: {e}"
 
+        if toolName == "run_bash":
+            try:
+                result = await self.func[toolName](**params)
+                return result
+            except Exception as e :
+                return f"工具执行出错: {e}"
         # 普通工具：同步执行，捕获所有异常
         try:
             result = self.func[toolName](**params)

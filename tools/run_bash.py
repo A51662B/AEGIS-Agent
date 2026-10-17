@@ -3,44 +3,51 @@ from tools.Toolregistry import tool
 import os
 import signal
 from dotenv import load_dotenv
+import asyncio
+import contextlib
 load_dotenv()
 
 _client = None
-# _async_client = None
 
 @tool(name="run_bash", description="执行命令，参数为命令，类型为字符串，返回值为命令执行的结果")
-def run_bash(command: str) -> str:
-    res = besh_check(command)
-    try:
-        if res["permission"] == "yes":
-            pass
-        elif res["permission"] == "no":
-            return f"该命令不允许执行：{res['reason']}"
-    except Exception:
-        return "审核器未返回有效结果，保守拒绝"
-    proc = subprocess.Popen(
-        command,
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd="/workspace",
-        start_new_session=True,  # 核心：创建独立进程组
-        )
+async def run_bash(command: str) -> str:          # ① async
+    res = await asyncio.to_thread(besh_check, command)   # ② 审查也别冻住循环
+    if res.get("permission") != "yes":
+        return f"该命令不允许执行：{res.get('reason')}"
 
+    proc = await asyncio.create_subprocess_shell(     # ③ 换成异步子进程
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd="/workspace",                                # ④ 不再硬编码 /workspace
+        start_new_session=(os.name != "nt"),          # POSIX 建进程组
+    )
     try:
-        stdout, stderr = proc.communicate(timeout=60)
-        return str(proc.returncode)+"|"+stdout + "|" + stderr 
-    except subprocess.TimeoutExpired as e:
-        # 向整个进程组发送 SIGKILL，一网打尽
-        os.killpg(proc.pid, signal.SIGKILL)  # proc.pid 就是进程组 ID
-        stdout, stderr = proc.communicate()  # 回收资源
-        return str(proc.returncode)+"|"+stdout + "|" + stderr + "|" +"超时" + str(e)
-    except Exception as e:
-        stdout = locals().get("stdout", "")
-        stderr = locals().get("stderr", "")
-        rc = proc.returncode if proc.returncode is not None else "None"
-        return f"{rc}|{stdout}|{stderr}|error:{e}"
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=60)
+        out_s = out.decode("utf-8", errors="replace")
+        err_s = err.decode("utf-8", errors="replace")
+        return str(proc.returncode)+"|"+out_s + "|" + err_s 
+    except asyncio.CancelledError:                    # ⑤ 关键：被取消时
+        await _kill_tree(proc)
+        raise                                         # 必须继续往上抛，让回滚跑
+    except asyncio.TimeoutError:
+        await _kill_tree(proc)
+        return f"{proc.returncode}|||超时"
+
+
+async def _kill_tree(proc):
+    if proc.returncode is not None:
+        return
+    if os.name == "nt":
+        sub = await asyncio.create_subprocess_exec(
+            "taskkill", "/F", "/T", "/PID", str(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await sub.wait()
+    else:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # 用 getpgid，别假设 pid==pgid
+    with contextlib.suppress(Exception):
+        await asyncio.shield(proc.wait())                      # 回收，别留僵尸
 
 
 def get_client():
