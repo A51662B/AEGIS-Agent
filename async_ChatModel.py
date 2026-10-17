@@ -9,11 +9,11 @@ from tools.Toolregistry import *
 from SubAgentMessageQueue import *
 from session_context import current_session
 from utils.subagent_state import subAgentState
+from config import *
 load_dotenv()
 
 _client = None
 _async_client = None
-
 
 def get_client():
     global _client
@@ -72,9 +72,12 @@ class ToolProxy:
         for task in list(self._tasks):
             if getattr(task, "_session_id", None) == session_id and not task.done():
                 task.cancel()
-        q.clear()
+        if queueManager.hasSubAgentMessageQueue(session_id):
+            q = queueManager.getSubAgentMessageQueue(session_id)
+            q.clear()
 
     async def invoke(self, toolName: str, params: dict):
+        q = queueManager.getSubAgentMessageQueue(current_session.get())
         # 未知工具：模型幻觉调用了不存在的工具
         if toolName not in self.func:
             return f"未知工具: {toolName}"
@@ -110,6 +113,7 @@ class ToolProxy:
         return result
 
     async def subAgentExecutor(self, params: dict):
+        q = queueManager.getSubAgentMessageQueue(current_session.get())
         # 子代理在后台 task 里跑，异常不会传到 invoke，必须在这里捕获
         try:
             await self.func["subAgent"](**params)
@@ -120,6 +124,7 @@ class ToolProxy:
             raise
 
     async def workflowExecutor(self, toolName: str, params: dict):
+        q = queueManager.getSubAgentMessageQueue(current_session.get())
         # 同步工作流（reportWorkflow / pdfToMarkdown 等）在后台 task 里用 to_thread 跑，
         # 异常不会传到 invoke，必须在这里捕获
         try:
@@ -132,7 +137,7 @@ class ToolProxy:
 
 
 class ChatModel:
-    def __init__(self, model="deepseek-flash", max_completion_tokens=1024, temperature=1.0,
+    def __init__(self, model=chat_model(), max_completion_tokens=1024, temperature=1.0,
                  top_p=0.95, frequency_penalty=0, stop=None, presence_penalty=0, tools=tools):
         self.model = model
         self.max_completion_tokens = max_completion_tokens

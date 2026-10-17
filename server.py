@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from Memory import Memory
 from async_ChatModel import ChatModel, ToolProxy
-from SubAgentMessageQueue import q
+from SubAgentMessageQueue import queueManager
 from Message import UserMessage, AsyncMessage, AssistantMessageFromParts, ToolMessage, messageProcess
 from session_store import session_store
 from session_context import current_session
@@ -17,6 +17,7 @@ from utils.title_generator import generate_and_save_title
 from utils.render_list import load_all_messages
 from utils.token_counter import get_usage
 from utils.subagent_state import subAgentState
+from config import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -67,7 +68,8 @@ async def _agent_stream(session_id: str):
         cp = memory.checkpoint()  # user 消息已 append，记录干净快照（供中断回滚）
         model = ChatModel()
         model.setSystemPrompt(MAIN_SYSTEM_PROMPT)  # 主 agent 系统提示词（不落盘）
-    
+        queueManager.createSubAgentMessageQueue(session_id)
+        q = queueManager.getSubAgentMessageQueue(session_id)
         max_rounds = 30
         for _round in range(max_rounds):
             stream = await model.stream_chat_async(memory.messageList)
@@ -191,6 +193,8 @@ async def _agent_stream(session_id: str):
             memory.append(UserMessage("用户手动中断了之前的操作，之前未完成的回复和工具调用已作废，请忽略它们，等待用户重新下达指令。"))
         # 取消本会话后台任务（子代理/工作流），清空队列计数
         toolProxy.cancel_session_tasks(session_id)
+        if queueManager.hasSubAgentMessageQueue(session_id):
+            queueManager.releaseSubAgentMessageQueue(session_id)
         current_session.reset(token)
 
 
@@ -299,7 +303,7 @@ async def get_all_messages(session_id: str):
 
 
 # 主对话模型（与 ChatModel 默认一致），token 统计用
-MODEL_NAME = "deepseek-v4.1-flash"
+MODEL_NAME = chat_model()
 
 
 @app.get("/api/token-usage/{session_id}")

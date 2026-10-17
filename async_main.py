@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from openai import OpenAI
@@ -5,14 +6,21 @@ from Message import *
 from Memory import *
 from async_ChatModel import *
 from SubAgentMessageQueue import *
+from session_context import current_session
 memory = Memory()
 memory.loadMemory()
 chatModel = ChatModel()
 toolProxy = ToolProxy()
 toolCalling = False
+CLI_SESSION_ID = "default"
 
 async def run():
     toolCalling = False
+    # CLI 只有一个隐式会话：必须设置 current_session 并建好队列，
+    # 否则 ToolProxy.invoke / subAgent 内部取队列时会 KeyError。
+    current_session.set(CLI_SESSION_ID)
+    queueManager.createSubAgentMessageQueue(CLI_SESSION_ID)
+    q = queueManager.getSubAgentMessageQueue(CLI_SESSION_ID)
     while True:
         if toolCalling == False and q.getSubAgentCount() == 0:
             userMessageContent = input("你：")
@@ -47,7 +55,7 @@ async def run():
             print("ai：" + message.content, end="\n")
             aiMessage = AssistantMessage(message)
             memory.append(aiMessage)
-
+    queueManager.releaseSubAgentMessageQueue(CLI_SESSION_ID)
 
 
 if __name__ == "__main__":

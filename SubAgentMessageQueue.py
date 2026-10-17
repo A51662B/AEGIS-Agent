@@ -36,6 +36,33 @@ class SubAgentMessageQueue:
                 break
         self.curSubAgentCount = 0
 
+class SubAgentMessageQueueManager:
+    # 内部持有多个 SubAgentMessageQueue 实例
+    def __init__(self):
+        self.queues: dict[str, SubAgentMessageQueue] = {}
+
+    def createSubAgentMessageQueue(self, sessionId:str):
+        if sessionId in self.queues:
+            raise RuntimeError(f"sessionId {sessionId} 的消息队列已经存在，禁止重复创建")
+        self.queues[sessionId] = SubAgentMessageQueue()
+
+    def getSubAgentMessageQueue(self, sessionId:str):
+        if sessionId not in self.queues:
+            raise KeyError(f"sessionId {sessionId} 消息队列不存在，请先调用 createSubAgentMessageQueue")
+        return self.queues[sessionId]
+            
+
+    def releaseSubAgentMessageQueue(self, sessionId:str):
+        if sessionId not in self.queues:
+            raise KeyError(f"release失败:sessionId {sessionId} 队列不存在")
+        queue = self.queues.pop(sessionId)
+        queue.clear()
+
+    def hasSubAgentMessageQueue(self, sessionId:str) -> bool:
+        return sessionId in self.queues
+    
+
+    
 
 
-q = SubAgentMessageQueue()
+queueManager = SubAgentMessageQueueManager()
