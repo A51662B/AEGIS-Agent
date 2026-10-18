@@ -347,7 +347,7 @@ html, body {
 }
 
 /* ===== 底部输入框 ===== */
-.composer { padding: 16px 32px 20px; }
+.composer { padding: 16px 32px 20px; position: relative; }
 .composer-box {
   display: flex;
   align-items: center;
@@ -397,6 +397,88 @@ html, body {
 .btn-send:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-stop { background: #e24b4a; }
 .btn-stop:hover { opacity: 0.85; }
+
+/* 输入框上方：上下文大小 / 占比 / 缓存命中率（可点击打开明细） */
+.usage-stats {
+  width: fit-content;
+  margin-left: auto;
+  padding: 2px 8px 4px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+  user-select: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.usage-stats:hover { background: var(--bg-hover); color: var(--text); }
+.usage-stats:empty { display: none; }
+.usage-caret { margin-left: 4px; font-size: 9px; opacity: 0.45; }
+
+/* 用量明细面板 */
+.usage-panel {
+  position: absolute;
+  right: 32px;
+  bottom: calc(100% - 8px);
+  width: 320px;
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  padding: 14px 20px 16px;
+  z-index: 40;
+}
+.usage-panel[hidden] { display: none; }
+.usage-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.usage-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 0;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.usage-tab:hover { background: var(--bg-hover); }
+.usage-tab.active { background: #1d1d1f; color: #ffffff; }
+.usage-rows { display: flex; flex-direction: column; gap: 7px; }
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.usage-row-main {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 2px;
+}
+.usage-row-main .usage-k { color: var(--text); }
+.usage-k { color: var(--text-tertiary); }
+.usage-v { color: var(--text); font-variant-numeric: tabular-nums; }
+.usage-row-main .usage-v { color: var(--text); }
+.usage-note {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-strong);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+/* 窗口太窄时不占地方 */
+@media (max-width: 1180px) {
+  .usage-stats { display: none; }
+  .usage-panel { display: none; }
+}
 
 /* ===== 右侧工作台 ===== */
 .workbench {
@@ -547,8 +629,8 @@ html, body {
 
 /* ===== 顶部工具栏（token 用量 + 压缩按钮） ===== */
 .token-ring {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
   cursor: pointer;

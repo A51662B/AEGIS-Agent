@@ -75,9 +75,102 @@ def count_tokens(message_list) -> int:
     return total
 
 
-def get_usage(message_list, model: str | None = None) -> dict:
-    """返回 {used, window, ratio}，ratio 是 0~1 的使用比例。"""
-    used = count_tokens(message_list)
+def count_text(text: str) -> int:
+    """估算一段纯文本的 token 数。"""
+    if not text:
+        return 0
+    encoding = _get_encoding()
+    return len(encoding.encode(text)) if encoding is not None else _estimate_chars(text)
+
+
+def _find_last_usage(message_list):
+    """从后往前找最近一条带真实 usage 的 assistant 消息，返回 (index, usage)。
+
+    usage 存在 rowmessage 里（Memory 落盘时只存 JSON 原生类型）。
+    真实 usage 的 prompt_tokens 是 API 给的精确上下文大小（含 system prompt + tools schema）。
+    """
+    for i in range(len(message_list) - 1, -1, -1):
+        m = message_list[i]
+        if getattr(m, "role", None) != "assistant":
+            continue
+        u = (getattr(m, "rowmessage", None) or {}).get("usage")
+        if u and u.get("prompt_tokens"):
+            return i, u
+    return None, None
+
+
+def get_usage(message_list, model: str | None = None, system_prompt: str = "") -> dict:
+    """统计上下文用量 + 累计花费 + 缓存命中。
+
+    上下文大小（used）优先用真实值：
+      最近一次调用的 prompt_tokens（精确，含 system prompt + tools schema）
+      + 之后新增消息的估算。
+    没有真实 usage 时（旧会话 / 尚未调用过）回退到纯估算，并补上 system prompt。
+
+    返回：
+      used / window / ratio : 当前上下文大小与占比
+      source                : "real"（含真实值）或 "estimated"
+      spend                 : 累计 prompt / completion / reasoning / total
+      cache                 : hit / miss / rate
+      calls                 : 统计到几次调用
+    """
     window = get_context_window(model)
-    ratio = (used / window) if window else 0.0
-    return {"used": used, "window": window, "ratio": round(ratio, 4)}
+    idx, real = _find_last_usage(message_list)
+
+    if real is not None:
+        tail = message_list[idx + 1:]
+        used = int(real.get("prompt_tokens") or 0) + count_tokens(tail)
+        source = "real"
+    else:
+        used = count_tokens(message_list) + count_text(system_prompt)
+        source = "estimated"
+
+    spend_prompt = spend_completion = spend_reasoning = 0
+    cache_hit = cache_miss = calls = 0
+    for m in message_list:
+        u = (getattr(m, "rowmessage", None) or {}).get("usage")
+        if not u:
+            continue
+        calls += 1
+        spend_prompt += u.get("prompt_tokens") or 0
+        spend_completion += u.get("completion_tokens") or 0
+        spend_reasoning += (u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
+        cache_hit += u.get("prompt_cache_hit_tokens") or 0
+        cache_miss += u.get("prompt_cache_miss_tokens") or 0
+
+    # 最近一次调用的单独统计（面板的"本轮"页签）
+    last = None
+    if real is not None:
+        l_hit = real.get("prompt_cache_hit_tokens") or 0
+        l_miss = real.get("prompt_cache_miss_tokens") or 0
+        l_sum = l_hit + l_miss
+        last = {
+            "prompt": real.get("prompt_tokens") or 0,
+            "hit": l_hit,
+            "miss": l_miss,
+            "rate": round(l_hit / l_sum, 4) if l_sum else 0.0,
+            "completion": real.get("completion_tokens") or 0,
+            "reasoning": (real.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0,
+            "cache_available": bool(l_sum),
+        }
+
+    total_cache = cache_hit + cache_miss
+    return {
+        "used": used,
+        "window": window,
+        "ratio": round(used / window, 4) if window else 0.0,
+        "source": source,
+        "calls": calls,
+        "spend": {
+            "prompt": spend_prompt,
+            "completion": spend_completion,
+            "reasoning": spend_reasoning,
+            "total": spend_prompt + spend_completion,
+        },
+        "cache": {
+            "hit": cache_hit,
+            "miss": cache_miss,
+            "rate": round(cache_hit / total_cache, 4) if total_cache else 0.0,
+        },
+        "last": last,
+    }

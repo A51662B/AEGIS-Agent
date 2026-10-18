@@ -12,7 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
   -->
 
-  <link rel="stylesheet" href="/static/style.css?v=20261013a" />
+  <link rel="stylesheet" href="/static/style.css?v=20261018e" />
 </head>
 <body>
   <div class="app">
@@ -42,10 +42,19 @@
         </div>
       </div>
       <div class="composer">
+        <div class="usage-panel" id="usage-panel" hidden>
+          <div class="usage-tabs">
+            <button type="button" class="usage-tab active" data-mode="total">累计</button>
+            <button type="button" class="usage-tab" data-mode="last">本轮</button>
+          </div>
+          <div class="usage-rows" id="usage-panel-body"></div>
+          <div class="usage-note">不含子代理与压缩消耗</div>
+        </div>
+        <div class="usage-stats" id="usage-stats"></div>
         <div class="composer-box">
           <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
           <button id="token-ring" class="token-ring" title="上下文用量，点击压缩">
-            <svg viewBox="0 0 36 36" width="22" height="22">
+            <svg viewBox="0 0 36 36" width="17" height="17">
               <circle class="ring-track" cx="18" cy="18" r="15" fill="none" stroke-width="3.5"/>
               <circle class="ring-progress" id="ring-progress" cx="18" cy="18" r="15" fill="none" stroke-width="3.5"
                       stroke-linecap="round" stroke-dasharray="94.2" stroke-dashoffset="94.2"
@@ -74,6 +83,6 @@
   </div>
 
   <script src="/static/vendor/marked.min.js"></script>
-  <script src="/static/app.js?v=20261013a"></script>
+  <script src="/static/app.js?v=20261018e"></script>
 </body>
 </html>

@@ -125,15 +125,146 @@ function setRing(ratio, used, window) {
   tokenRing.title = '上下文用量 ' + detail + '，点击压缩';
 }
 
+let usageSnapshot = null;      // 最近一次 /api/token-usage 的结果
+let usagePanelMode = 'total';  // 'total' | 'last'
+
+// pill：只展示累计口径（上下文大小 / 占比 / 累计命中率）
+function setUsageStats(usage) {
+  const elStats = $('#usage-stats');
+  if (!elStats) return;
+  usageSnapshot = usage;
+
+  if (!usage) {
+    elStats.textContent = '';
+    elStats.title = '';
+    closeUsagePanel();
+    return;
+  }
+
+  // 没有真实 usage 时（旧会话）是估算值，加个 ≈ 区分
+  const approx = usage.source === 'estimated' ? '≈' : '';
+  const pct = Math.round((usage.ratio || 0) * 100);
+  const cache = usage.cache || {};
+  const n = (cache.hit || 0) + (cache.miss || 0);
+  const cacheText = n > 0 ? `缓存 ${((cache.rate || 0) * 100).toFixed(1)}%` : '缓存 —';
+
+  elStats.textContent =
+    `${approx}${formatTokens(usage.used || 0)}/${formatTokens(usage.window || 0)}` +
+    ` · ${pct}% · ${cacheText}`;
+  elStats.appendChild(el('span', 'usage-caret', '▾'));
+  elStats.title = '点击查看详细用量';
+
+  const panel = $('#usage-panel');
+  if (panel && !panel.hidden) renderUsagePanel();
+}
+
+// 明细面板的行：mode = 'total'（累计） | 'last'（最新一次调用）
+// 每行返回 [label, value, isMain]，isMain 的那行加粗放大
+function pctText(r) {
+  return ((Number(r) || 0) * 100).toFixed(1) + '%';
+}
+
+function usageRows(mode) {
+  const u = usageSnapshot;
+  if (!u) return [['', '暂无数据', false]];
+
+  if (mode === 'last') {
+    if (!('last' in u)) return [['', '服务端版本较旧，请重启后重试', false]];
+    const l = u.last;
+    if (!l) return [['', '这个会话还没有调用记录', false]];
+    const rows = [['Token 用量', formatTokens(l.prompt || 0), true]];
+    if (l.cache_available) {
+      rows.push(['缓存读取', formatTokens(l.hit || 0), false]);
+      rows.push(['未缓存输入', formatTokens(l.miss || 0), false]);
+      rows.push(['缓存命中率', pctText(l.rate), false]);
+    } else {
+      rows.push(['缓存', '未上报', false]);
+    }
+    rows.push(['输出', formatTokens(l.completion || 0), false]);
+    if (l.reasoning) rows.push(['其中思考', formatTokens(l.reasoning), false]);
+    return rows;
+  }
+
+  const s = u.spend || {};
+  const c = u.cache || {};
+  const rows = [['Token 用量', formatTokens(s.prompt || 0), true]];
+  if ((c.hit || 0) + (c.miss || 0) > 0) {
+    rows.push(['缓存读取', formatTokens(c.hit || 0), false]);
+    rows.push(['未缓存输入', formatTokens(c.miss || 0), false]);
+    rows.push(['缓存命中率', pctText(c.rate), false]);
+  } else {
+    rows.push(['缓存', '未上报', false]);
+  }
+  rows.push(['累计输出', formatTokens(s.completion || 0), false]);
+  if (s.reasoning) rows.push(['其中思考', formatTokens(s.reasoning), false]);
+  return rows;
+}
+
+function renderUsagePanel() {
+  const body = $('#usage-panel-body');
+  if (!body) return;
+  body.innerHTML = '';
+  usageRows(usagePanelMode).forEach(([k, v, isMain]) => {
+    const row = el('div', isMain ? 'usage-row usage-row-main' : 'usage-row');
+    if (k) row.appendChild(el('span', 'usage-k', k));
+    row.appendChild(el('span', 'usage-v', v));
+    body.appendChild(row);
+  });
+  document.querySelectorAll('.usage-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === usagePanelMode);
+  });
+}
+
+function openUsagePanel(open) {
+  const panel = $('#usage-panel');
+  if (!panel) return;
+  panel.hidden = !open;
+  if (open) renderUsagePanel();
+}
+
+function closeUsagePanel() {
+  openUsagePanel(false);
+}
+
+const usageStatsEl = $('#usage-stats');
+if (usageStatsEl) {
+  usageStatsEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const panel = $('#usage-panel');
+    openUsagePanel(panel ? panel.hidden : false);
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const panel = $('#usage-panel');
+  if (!panel || panel.hidden) return;
+  if (panel.contains(e.target)) return;
+  if (e.target.closest && e.target.closest('#usage-stats')) return;
+  closeUsagePanel();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeUsagePanel();
+});
+
+document.querySelectorAll('.usage-tab').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    usagePanelMode = btn.dataset.mode || 'total';
+    renderUsagePanel();
+  });
+});
+
 async function updateTokenUsage() {
   if (!currentSession) {
     setRing(0);
+    setUsageStats(null);
     return null;
   }
   try {
     const res = await fetch('/api/token-usage/' + currentSession);
     const usage = await res.json();
     setRing(usage.ratio, usage.used, usage.window);
+    setUsageStats(usage);
     return usage;
   } catch (e) {
     return null;
