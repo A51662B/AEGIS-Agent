@@ -79,8 +79,10 @@ async def _agent_stream(session_id: str):
             tool_calls = {}  # index -> {"id","name","arguments"}
             role = None
             finish_reason = None
-    
+            _last_usage = None
             async for chunk in stream:
+                if getattr(chunk, "usage", None) is not None:
+                    _last_usage = chunk.usage
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
@@ -135,6 +137,7 @@ async def _agent_stream(session_id: str):
                 "reasoning_content": reasoning or None,
                 "tool_calls": std_tool_calls,
                 "finish_reason": finish_reason,
+                "usage": _last_usage.model_dump() if _last_usage is not None else None,
             }
     
             if tool_calls:
@@ -182,8 +185,12 @@ async def _agent_stream(session_id: str):
             return
     
         yield _sse("error", {"message": "达到最大工具调用轮数，已终止"})
-    
-    
+
+    except BaseException as e:
+        if not isinstance(e, asyncio.CancelledError):
+            import traceback
+            traceback.print_exc()      # 真异常打出来，取消不打
+        raise
     finally:
         # 中断/异常：回滚这一轮产生的所有消息（内存截断 + 磁盘 truncate），保证下次调用消息链干净
         if not completed and memory is not None and cp is not None:
