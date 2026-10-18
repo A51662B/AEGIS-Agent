@@ -316,7 +316,8 @@ MODEL_NAME = chat_model()
 @app.get("/api/token-usage/{session_id}")
 async def get_token_usage(session_id: str):
     memory = get_memory(session_id)
-    return get_usage(memory.messageList, MODEL_NAME)
+    # 传 system_prompt：没有真实 usage 时要把它补进估算（它不在 messageList 里）
+    return get_usage(memory.messageList, MODEL_NAME, MAIN_SYSTEM_PROMPT)
 
 
 @app.post("/api/compact/{session_id}")
