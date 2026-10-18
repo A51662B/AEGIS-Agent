@@ -241,7 +241,8 @@ class ChatModel:
             presence_penalty=self.presence_penalty,
             tools=self.tools,
             reasoning_effort="high",
-            extra_body={"thinking": {"type": "enabled"}}
+            extra_body={"thinking": {"type": "enabled"}},
+            stream_options={"include_usage": True},
         )
         return stream
 
