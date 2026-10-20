@@ -37,6 +37,17 @@ def get_async_client():
 tools = toolregistry.getToolDescription()
 func = toolregistry.getToolMap()
 
+# 异步工具返回占位说明后，追加给模型的行为指引。
+# 模型只需要知道"停手 = 进入等待"，具体怎么等是 harness 的事，它不需要也不该知道。
+_ASYNC_HINT_TAIL = (
+    "你现在有两种做法：如果还有别的信息要收集，就继续调用其他工具；"
+    "如果没有了，就不要调用任何工具，直接输出一句简短说明（例如“等待结果中”），"
+    "系统会自动等待后台任务完成并把结果作为新消息交给你。"
+    "不要用任何工具（list_directory、read_file 等）检查进度"
+    "——异步任务的文件可能尚未生成，你查不到结果。"
+)
+
+
 class ToolProxy:
     # 同步工作流工具 -> 前端占位提示（后台 to_thread 执行，结果进队列 q）
     WORKFLOW_TOOLS = {
@@ -87,7 +98,8 @@ class ToolProxy:
             try:
                 q.SubAgentCountPlus()
                 self._spawn(self.subAgentExecutor(params))
-                return "（子代理任务已在后台启动，结果稍后自动返回，无需额外操作）"
+                return (f"（子代理任务已在后台启动，结果稍后自动返回。）\n"
+                        f"{_ASYNC_HINT_TAIL}")
             except Exception as e:
                 return f"子代理启动失败: {e}"
 
@@ -95,7 +107,8 @@ class ToolProxy:
             try:
                 q.SubAgentCountPlus()
                 self._spawn(self.workflowExecutor(toolName, params))
-                return f"（{self.WORKFLOW_TOOLS[toolName]}，结果稍后自动返回，无需额外操作）"
+                return (f"（{self.WORKFLOW_TOOLS[toolName]}，结果稍后自动返回。）\n"
+                        f"{_ASYNC_HINT_TAIL}")
             except Exception as e:
                 return f"工作流启动失败: {e}"
 

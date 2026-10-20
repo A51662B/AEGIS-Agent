@@ -78,6 +78,27 @@ def AsyncMessage(message: str):
     )
 
 
+def InjectedMessage(message: str, kind: str = "rollback"):
+    """系统注入的消息：给模型看是 user，但不是真实用户输入。
+
+    与 AsyncMessage 同一个模式——两层 role：
+      · role="injected"  ← 内部标记，前端(app.js 的 if/else 链)会自动跳过渲染，
+                             trace 也据此不把它当作轮边界
+      · message.role="user"  ← 发给 LLM 的仍是 user，语义不变
+
+    kind: 注入原因，目前只有 rollback（中断回滚）。后续可扩展
+          error / max_rounds，但先统一记在 role 里，不动 type 字段。
+    """
+    return Message(
+        role="injected",
+        type="normal",
+        uuid=str(uuid.uuid4()),
+        timestamp=gettime(),
+        message={"role": "user", "content": message},
+        rowmessage=None
+    )
+
+
 def AssistantMessage(message):
     if message.tool_calls:
 

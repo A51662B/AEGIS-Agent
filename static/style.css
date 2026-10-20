@@ -132,6 +132,21 @@ html, body {
   border-top: 1px solid var(--border);
 }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.btn-trace {
+  margin-left: auto;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.btn-trace:hover { background: var(--bg-hover); color: var(--text); }
+.btn-trace:disabled { opacity: 0.4; cursor: default; }
 
 /* ===== 中间对话流 ===== */
 .chat {
