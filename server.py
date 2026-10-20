@@ -4,13 +4,13 @@ import threading
 import asyncio
 
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from Memory import Memory
 from async_ChatModel import ChatModel, ToolProxy
 from SubAgentMessageQueue import queueManager
-from Message import UserMessage, AsyncMessage, AssistantMessageFromParts, ToolMessage, messageProcess
+from Message import UserMessage, AsyncMessage, InjectedMessage, AssistantMessageFromParts, ToolMessage, messageProcess
 from session_store import session_store
 from session_context import current_session
 from utils.title_generator import generate_and_save_title
@@ -195,9 +195,7 @@ async def _agent_stream(session_id: str):
         # 中断/异常：回滚这一轮产生的所有消息（内存截断 + 磁盘 truncate），保证下次调用消息链干净
         if not completed and memory is not None and cp is not None:
             memory.rollback(cp)
-            # 回滚后追加一条用户消息，明确告知模型"已中断，重新接收指令"，
-            # 避免模型看到上一条仍是"调用工具"的指令，下次又接着调工具
-            memory.append(UserMessage("用户手动中断了之前的操作，之前未完成的回复和工具调用已作废，请忽略它们，等待用户重新下达指令。"))
+            memory.append(InjectedMessage("用户手动中断了之前的操作，之前未完成的回复和工具调用已作废，请忽略它们，等待用户重新下达指令。"))
         # 取消本会话后台任务（子代理/工作流），清空队列计数
         toolProxy.cancel_session_tasks(session_id)
         if queueManager.hasSubAgentMessageQueue(session_id):
@@ -318,6 +316,22 @@ async def get_token_usage(session_id: str):
     memory = get_memory(session_id)
     # 传 system_prompt：没有真实 usage 时要把它补进估算（它不在 messageList 里）
     return get_usage(memory.messageList, MODEL_NAME, MAIN_SYSTEM_PROMPT)
+
+
+@app.get("/api/trace/{session_id}")
+async def get_trace(session_id: str):
+    """把会话记忆渲染成单文件 HTML（轮/步/耗时/工具配对）。"""
+    from observability.viewer import build_html
+    doc = await asyncio.to_thread(build_html, session_id)
+    return HTMLResponse(doc)
+
+
+@app.get("/api/analysis/{session_id}")
+async def get_analysis(session_id: str):
+    """独立页面：规则引擎跑出的异常清单。"""
+    from observability.analyzer import build_analysis_page
+    doc = await asyncio.to_thread(build_analysis_page, session_id)
+    return HTMLResponse(doc)
 
 
 @app.post("/api/compact/{session_id}")

@@ -854,6 +854,16 @@ $('#send').addEventListener('click', () => {
   else send();
 });
 tokenRing.addEventListener('click', () => compactSession(false));
+
+// Trace：新标签页打开当前会话的执行轨迹（轮/步/耗时/工具配对）
+const openTraceBtn = $('#open-trace');
+if (openTraceBtn) {
+  openTraceBtn.addEventListener('click', () => {
+    if (!currentSession) return;
+    window.open('/api/trace/' + encodeURIComponent(currentSession), '_blank');
+  });
+}
+
 $('#new-session').addEventListener('click', () => {
   currentSession = newSessionId();
   chatScroll.innerHTML = '';
