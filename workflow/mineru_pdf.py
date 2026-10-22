@@ -351,4 +351,4 @@ def folder_extract_all(folder: str, output_dir: str = None, **kwargs) -> dict:
 #                 print("（解析失败）")
 
 
-# result = folder_to_markdown(r"D:\Users\31181\Desktop\4.13")
+# result = folder_to_markdown(r"D:/papers")

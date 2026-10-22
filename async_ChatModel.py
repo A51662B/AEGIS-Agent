@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 from dotenv import load_dotenv
 from openai import OpenAI, AsyncOpenAI
 from Message import messageProcess
@@ -36,6 +37,48 @@ def get_async_client():
 
 tools = toolregistry.getToolDescription()
 func = toolregistry.getToolMap()
+
+# 通过 MCP 接进来的工具名。它们是异步调用，不在 func 里，
+# 所以 invoke 的"未知工具"判断必须把它们也算作已知。
+MCP_TOOL_NAMES: set[str] = set()
+
+# MCP 管理器实例：由 get_mcp() 在第一次对话请求前创建
+_mcp = None
+
+
+async def get_mcp():
+    """连接外部 MCP 服务端，并把它的工具登记进来。
+
+    服务端脚本路径从环境变量读：
+        MCP_SERVER_PATH   mcp_server.py 的绝对路径（不填则不接外部工具）
+        MCP_SERVER_CWD    服务端工作目录（不填则用脚本所在目录）
+
+    在 _agent_stream 开头调用一次；连不上就跳过，不影响主流程。
+    """
+    global _mcp
+    if _mcp is not None:
+        return _mcp
+
+    server_path = (os.getenv("MCP_SERVER_PATH") or "").strip()
+    if not server_path:
+        return None                      # 没配置就不接，静默跳过
+
+    from mcp_kit import MCPManager
+
+    try:
+        m = MCPManager(
+            command=sys.executable,
+            args=[server_path],
+            cwd=(os.getenv("MCP_SERVER_CWD") or "").strip() or None,
+            timeout=60,
+        )
+        await m.start()
+        tools.extend(m.to_openai_functions())   # 模型能看到这些工具
+        MCP_TOOL_NAMES.update(m.tool_names())   # invoke 靠它分发
+        _mcp = m
+    except Exception as e:
+        print(f"[mcp] 启动失败，本次不加载 MCP 工具：{e}", file=sys.stderr)
+    return _mcp
 
 # 异步工具返回占位说明后，追加给模型的行为指引。
 # 模型只需要知道"停手 = 进入等待"，具体怎么等是 harness 的事，它不需要也不该知道。
@@ -89,8 +132,23 @@ class ToolProxy:
 
     async def invoke(self, toolName: str, params: dict):
         q = queueManager.getSubAgentMessageQueue(current_session.get())
+
+        # MCP 工具：异步调用，放在"未知工具"判断之前
+        if toolName in MCP_TOOL_NAMES:
+            if _mcp is None:
+                return f"MCP 服务端未连接，无法调用 {toolName}"
+            try:
+                result = await _mcp.call(toolName, params)
+            except asyncio.TimeoutError:
+                return f"工具 {toolName} 超时"
+            except Exception as e:
+                return f"工具 {toolName} 执行出错: {e}"
+            if result.get("is_error"):
+                return f"工具执行失败：{result.get('text', '')}"
+            return result.get("text") or json.dumps(result.get("data"), ensure_ascii=False)
+
         # 未知工具：模型幻觉调用了不存在的工具
-        if toolName not in self.func:
+        if toolName not in self.func and toolName not in MCP_TOOL_NAMES:
             return f"未知工具: {toolName}"
 
         # 子代理：异步执行，立即返回占位提示

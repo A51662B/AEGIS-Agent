@@ -53,13 +53,54 @@ function makeTyping() {
   return typing;
 }
 
+// 公式保护：先把 $...$ / $$...$$ 抽出来换成占位符，再交给 marked。
+// 不这么做的话 marked 会把公式里的 _ 和 * 当强调标记，$y_h^{(i)}$ 会被拆成斜体。
+const MATH_SPAN_RE = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+const MATH_PLACEHOLDER_RE = /@@MATH(\d+)@@/g;
+
+function protectMath(text) {
+  const store = [];
+  const out = text.replace(MATH_SPAN_RE, (m, block, inline) => {
+    const tex = block !== undefined ? block : inline;
+    const display = block !== undefined;
+    store.push({ tex: tex, display: display });
+    return '@@MATH' + (store.length - 1) + '@@';
+  });
+  return { out: out, store: store };
+}
+
+function restoreMath(html, store) {
+  if (!store.length) return html;
+  return html.replace(MATH_PLACEHOLDER_RE, (m, idx) => {
+    const item = store[Number(idx)];
+    if (!item) return m;
+    if (typeof katex === 'undefined' || !katex.renderToString) {
+      return item.display ? item.tex : item.tex;
+    }
+    try {
+      return katex.renderToString(item.tex.trim(), {
+        displayMode: item.display,
+        throwOnError: false,
+        strict: false,
+        trust: false,
+      });
+    } catch (e) {
+      return m;  // 渲染失败就保留原文，不要让整段消失
+    }
+  });
+}
+
 function mdRender(text) {
+  const guarded = protectMath(text);
+  let html;
   if (typeof marked !== 'undefined' && marked.parse) {
-    return marked.parse(text, { breaks: true, gfm: true });
+    html = marked.parse(guarded.out, { breaks: true, gfm: true });
+  } else {
+    const div = document.createElement('div');
+    div.textContent = guarded.out;
+    html = div.innerHTML;
   }
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return restoreMath(html, guarded.store);
 }
 
 /* ===== 会话列表 ===== */

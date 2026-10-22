@@ -2,44 +2,33 @@
 
 > 一个会读论文的 LLM Agent —— 边学 agent 开发边做的个人项目。
 
-给它一个装满论文的文件夹，它会自己把 PDF 解析成 Markdown、按章节拆开、挑重点读完，然后交给你一份结构化总结。除此之外，它还能联网搜索、读写文件、开子代理并行干活。
+给它一个装满论文的文件夹，它会自己把 PDF 解析成 Markdown、按章节拆开、挑重点读完，然后交给你结构化总结。
+除此之外，它还能联网搜索、读写文件、执行命令、开子代理并行干活，通过 MCP 接入外部工具服务。
 
-项目跑在本地，模型接口走 OpenAI 兼容格式，目前只能接入deepseek。
+项目跑在本地，模型接口走 OpenAI 兼容格式。
+
+![界面截图](assets/screenshot.png)
+
+> 截图放在 `assets/screenshot.png`。
 
 ---
 
 ## 它能做什么
 
-### 读论文
+**读论文** —— 给一个文件夹，走完「解析 → 切分 → 精读 → 总结」四步。
+全文留在磁盘上，想深挖哪部分再按需取回。
 
-把论文 PDF 丢进一个文件夹，跟它说一声就行。它会走完整个流程：
+**批量写报告** —— 一次处理整个文件夹，逐篇读完汇总成综述。
 
-**解析**（PDF → Markdown，含图片）
-→ **切分**（按章节拆成小文件，附一份章节清单）
-→ **精读**（第一遍只读标题 / 摘要 / 介绍 / 方法 / 实验这五类）
-→ **总结**（输出结构化的论文摘要）
+**联网搜索** —— 接 Tavily 查实时信息。
 
-全文始终留在磁盘上，想深挖哪部分再按需取回，不会丢内容。
+**文件与命令** —— 工作区内读写文件；执行命令前经 LLM 安全审查，权限限制在工作区。
 
-### 批量写报告
+**子代理** —— 复杂任务拆给子代理异步推进，主代理不必等它读完所有材料。
 
-论文多的时候，可以一次性把整个文件夹批量解析、逐篇读完，最后汇总成一份综述报告。
+**接入外部工具（MCP）** —— 通过 MCP 协议把外部服务当工具用。仓库自带一个客户端的完整实现。
 
-### 联网搜索
-
-接入 Tavily，能查实时信息。
-
-### 文件操作
-
-可以在工作区里读、写、追加、替换文件。
-
-### 子代理
-
-复杂任务可以开子代理并行推进。
-
-### 执行bash命令
-
-执行命令前经过llm安全审查节点，权限限制在工作区。
+**公式渲染** —— 前端用本地 KaTeX 渲染 `$...$`，不依赖 CDN。
 
 ---
 
@@ -59,74 +48,167 @@ pip install -r requirements.txt
 
 ### 配置
 
-在项目根目录建一个 `.env` 文件：
+复制模板并填入你的 key：
+
+```bash
+cp .env.example .env
+```
 
 ```ini
-# 必填：模型接口（OpenAI 兼容格式）
+# 必填
 OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://your-endpoint/v1
 
-# 可选：模型名，不填则回落到主模型
+# 可选
 CHAT_MODEL=deepseek-flash
 REPORT_MODEL=
 TITLE_MODEL=
+CONTEXT_WINDOW=128000
 
-# 用联网搜索时需要
+# 用到对应功能才需要
 TAVILY_API_KEY=
-
-# 用 PDF 解析 / 报告工作流时需要
 MINERU_API_TOKEN=
-
-
 ```
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `OPENAI_API_KEY` | ✅ | 模型 API Key |
-| `OPENAI_BASE_URL` | ✅ | 模型 API 地址，需兼容 OpenAI 格式 |
+| `OPENAI_API_KEY` | 是 | 模型 API Key |
+| `OPENAI_BASE_URL` | 是 | 模型接口地址，需兼容 OpenAI 格式 |
 | `CHAT_MODEL` | | 主对话模型，默认 `deepseek-flash` |
-| `REPORT_MODEL` | | 报告工作流模型，缺省回落到 `CHAT_MODEL` |
-| `TITLE_MODEL` | | 会话标题模型，缺省回落到 `CHAT_MODEL` |
-| `TAVILY_API_KEY` | | 联网搜索（Tavily） |
+| `REPORT_MODEL` | | 报告工作流模型，缺省回落 `CHAT_MODEL` |
+| `TITLE_MODEL` | | 会话标题模型，缺省回落 `CHAT_MODEL` |
+| `CONTEXT_WINDOW` | | 上下文窗口大小，默认 128000，影响用量面板占比 |
+| `TAVILY_API_KEY` | | 联网搜索 |
 | `MINERU_API_TOKEN` | | PDF 解析（MinerU Standard API） |
 
 ### 运行
-
-**Web 界面**（推荐）
 
 ```bash
 python server.py
 ```
 
-打开 <http://127.0.0.1:8000> —— 支持流式输出、多会话管理、中断生成、一键压缩上下文。
+打开 <http://127.0.0.1:8000>。支持流式输出、多会话、中断生成、一键压缩上下文、工具调用面板。
 
-**命令行**
+命令行也可以：
 
 ```bash
-python main.py        # 同步版
-python async_main.py  # 异步版，支持子代理
+python main.py        # 同步
+python async_main.py  # 异步，支持子代理
 ```
+
+---
+
+## 架构
+
+```
+浏览器
+  │  SSE
+  ▼
+server.py（FastAPI）
+  │  _agent_stream：每轮对话一个流
+  ▼
+ChatModel / async_ChatModel
+  │  messages + tools → 模型
+  ▼
+ToolProxy.invoke(工具名, 参数)
+  ├─ 普通工具      → 直接调用，同步返回
+  ├─ 长任务工具    → spawn 后台 task，先回占位提示，结果进队列
+  ├─ subAgent      → 独立 Memory + 独立上下文，结果回队列
+  └─ MCP 工具      → await mcp.call(...)，服务端是独立进程
+  │
+  ▼
+工具结果 → 写回 Memory → 下一轮或输出
+```
+
+三个值得说的设计：
+
+**长任务不阻塞**：工作流类工具丢进后台 task，先给模型一句「任务运行中」，结果通过
+`SubAgentMessageQueue` 回传。异常也必须 `q.put` 回队列，否则主循环会永远卡在 `await q.get()`。
+
+**子代理上下文隔离**：`subAgent` 自己开一个 Memory，在里面读多少材料都行，最后只把一段文字还给主代理。
+这是控制主上下文膨胀最有效的手段。
+
+**工具可插拔**：`@tool(name, description)` 一行注册，参数 schema 从函数签名自动生成；
+MCP 工具走另一条注册路径，模型看到的是同一份 `tools` 列表。
 
 ---
 
 ## 内置工具
 
-模型可以自主调用下面这些工具：
+模型可以自主调用这些工具：
 
 | 工具 | 作用 |
 |---|---|
-| `pdfToMarkdown` | 调用 MinerU 把目录下的 PDF 批量解析成 Markdown（完整保留正文与图片） |
-| `splitPaper` | 把解析出的 `full.md` 按章节切分，并生成章节清单（类别 + 标题 + 字符数） |
-| `reportWorkflow` | 批量读论文并自动汇总成报告 |
-| `skilltool` | 加载 `skills/` 下的技能手册，按手册里的流程执行 |
+| `pdfToMarkdown` | 调 MinerU 把目录下的 PDF 批量解析成 Markdown（保留正文与图片） |
+| `splitPaper` | 把 `full.md` 按章节切分，生成章节清单（类别 + 标题 + 字符数） |
+| `reportWorkflow` | 批量读论文并汇总成报告 |
+| `skilltool` | 加载 `skills/` 下的技能手册，按手册流程执行 |
+| `subAgent` | 开异步子代理处理子任务（不允许嵌套） |
 | `web_search` | 联网搜索（Tavily） |
-| `subAgent` | 开一个异步子代理，并行处理子任务 |
+| `run_bash` | 执行命令，执行前经 LLM 安全审查，权限限制在工作区 |
 | `list_directory` | 列出目录内容 |
-| `read_file` | 读取文件内容 |
+| `read_file` | 读取文件 |
 | `write_file` | 创建或覆盖文件 |
-| `append_file` | 追加内容到文件末尾 |
-| `replace_in_file` | 替换文件中的一段文字 |
-| `get_current_time` | 获取当前日期、时间和星期 |
+| `append_file` | 追加内容 |
+| `replace_in_file` | 替换一段文字 |
+| `get_current_time` | 当前日期、时间、星期 |
+
+---
+
+## 技能（skills）
+
+`skills/` 下每个 `.md` 就是一份**写给模型看的操作手册**。模型不会一次读完所有手册，
+而是通过 `skilltool` 按需加载——真要用到时才把完整流程取出来。
+
+| 技能 | 什么时候用 |
+|---|---|
+| `read_paper` | 从 PDF 开始完整读一篇论文并输出结构化总结 |
+| `rag_kb` | 需要知识库里的具体事实：数值、方法细节、实验结果 |
+| `claim_check` | 交一段自己写的论述，要求核查依据并改写 |
+| `style_rewrite` | 要求改善语言风格、润色、改成像论文的写法 |
+
+新增技能只要丢一个 `.md` 进 `skills/`：
+
+```markdown
+# 这个技能是干什么的（第一行会成为描述，模型据此判断何时加载）
+
+（下面写流程和规则）
+```
+
+第一行 `#` 后面的文字会自动进入 `skilltool` 的工具描述。
+
+技能的调用时机由系统提示词控制（见 `server.py` 的 `MAIN_SYSTEM_PROMPT`）：
+每个技能在提示词里都有一段触发条件，避免模型「看见工具就直接用、想不起来先读规则」。
+
+---
+
+## 接入外部工具（MCP）
+
+`mcp_kit/` 是一个最小可用的 MCP 客户端：连接服务端、握手、取工具列表、调用工具。
+
+```python
+from mcp_kit import MCPManager
+
+mgr = MCPManager(
+    command=sys.executable,
+    args=["D:/path/to/my-ragflow/mcp_server.py"],
+    cwd="D:/path/to/my-ragflow",
+    timeout=60,
+)
+await mgr.start()                          # 连接 + 握手 + 取工具列表
+tools = mgr.to_openai_functions()          # 转成 toolregistry 认识的样子
+result = await mgr.call("kb_search", {"query": "..."})
+await mgr.stop()
+```
+
+接进 agent 的三个位置（见 `async_ChatModel.py`）：
+
+1. `get_mcp()` —— 第一次请求前连接一次，工具描述 append 进 `tools`，名字记进 `MCP_TOOL_NAMES`
+2. `invoke()` —— 命中 `MCP_TOOL_NAMES` 就走异步分支，带超时与异常捕获
+3. `_agent_stream()` —— 每轮开头 `await get_mcp()`，幂等
+
+注意：MCP 的包目录不能命名为 `mcp`，否则会遮蔽官方 SDK（Python 优先从当前目录找同名包）。
+所以这里叫 `mcp_kit`。
 
 ---
 
@@ -134,52 +216,39 @@ python async_main.py  # 异步版，支持子代理
 
 ```
 AEGIS-Agent/
-├── server.py                  Web 服务入口（FastAPI + SSE 流式输出）
-├── main.py                    命令行入口（同步）
-├── async_main.py              命令行入口（异步，支持子代理）
+├── server.py                  Web 入口（FastAPI + SSE）
+├── main.py / async_main.py    命令行入口
 ├── ChatModel.py               模型调用 + 工具调度（同步）
-├── async_ChatModel.py         模型调用 + 工具调度（异步）
+├── async_ChatModel.py         模型调用 + 工具调度（异步，含 MCP 分发）
 ├── Memory.py                  会话记忆：持久化、压缩、检查点回滚
-├── Message.py                 消息类型定义与格式转换
+├── Message.py                 消息类型与格式转换
 ├── session_store.py           会话目录管理
-├── session_context.py         当前会话的上下文变量
+├── session_context.py         当前会话的 contextvar
 ├── SubAgentMessageQueue.py    子代理结果队列
-├── config.py                  模型名配置
-│
-├── tools/                     内置工具
+├── config.py                  模型名与上下文窗口配置
+├── mcp_kit/                   MCP 客户端
+├── tools/                     内置工具与注册表
 ├── workflow/                  LangGraph 工作流（PDF 解析 / 报告生成）
-├── skills/                    技能手册（Markdown，模型按需加载）
-├── utils/                     分词计数、标题生成、章节切分等
-├── static/                    Web 前端
-│
-├── memory/                    会话数据 ← 运行时生成，不入库
-└── workspace/                 工作区 ← 运行时生成，不入库
+├── skills/                    技能手册
+├── observability/             会话分析：加载、规则、查看器
+├── utils/                     分词计数、标题生成、章节切分、子代理状态
+├── static/                    Web 前端（含本地 KaTeX）
+├── assets/                    README 用图
+├── memory/                    会话数据（运行时生成，不入库）
+└── workspace/                 工作区（运行时生成，不入库）
 ```
-
----
-
-## 技能（skills）
-
-`skills/` 目录下每个 `.md` 文件就是一个**技能** —— 一份写给模型看的操作手册。
-
-模型不会一次性把所有手册读完，而是通过 `skilltool` 按需加载：真要用到读论文时，才把 `read_paper` 的完整流程取出来照着做。
-
-新增技能只要往 `skills/` 里丢一个 `.md` 文件：
-
-```markdown
-# 这里写这个技能是干什么的
-
-（下面写具体流程和规则）
-```
-
-第一行 `#` 后面的文字会自动成为这个技能的描述，模型据此判断什么时候该用它。
-
-目前内置：`read_paper` —— 论文阅读流程。
 
 ---
 
 ## 说明
 
-- `memory/` 和 `workspace/` 是运行时目录，程序会自行创建，不纳入版本控制。
-- 模型接口走 OpenAI 兼容格式，理论上可以接任何兼容服务。
+- `memory/` 和 `workspace/` 是运行时目录，程序自动创建，不纳入版本控制。
+- 模型接口走 OpenAI 兼容格式，理论上可接任何兼容服务。
+- `static/vendor/` 里的 marked 和 KaTeX 是本地资源，离线也能渲染公式。
 - 个人学习项目，还在持续完善中。
+
+---
+
+## License
+
+MIT。

@@ -23,3 +23,7 @@ tiktoken>=0.6.0
 
 # 工作流编排（workflow/ 下的 PDF 解析与报告生成）
 langgraph>=0.2.0
+
+# MCP 客户端（mcp_kit/，接入外部工具服务；不接就不需要）
+mcp>=2.0
+

@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse, HTM
 from fastapi.staticfiles import StaticFiles
 
 from Memory import Memory
-from async_ChatModel import ChatModel, ToolProxy
+from async_ChatModel import ChatModel, ToolProxy, get_mcp
 from SubAgentMessageQueue import queueManager
 from Message import UserMessage, AsyncMessage, InjectedMessage, AssistantMessageFromParts, ToolMessage, messageProcess
 from session_store import session_store
@@ -39,6 +39,16 @@ _active_tasks = {}
 # 都是给它的内部实现细节，绝不能向用户复述、汇报或强调（例如"我已经按你的要求…""我按要求等待…"）。
 MAIN_SYSTEM_PROMPT = """你是 AEGIS，一名专业的学术科研助手，帮助用户阅读论文、解析 PDF、整理文献、总结内容、回答科研问题。
 
+【知识库】本系统已接入本地 RAG 论文知识库，工具为 kb_list、kb_search、kb_ingest、kb_delete。
+凡是需要文档里的具体事实（数值、方法细节、实验设置、对比结论）时，第一步必须先调用 skilltool，skill_name 传 rag_kb，读完使用规则后再调用 kb_search。
+该规则明确了：每个问题最多检索 5 次；查询用 1 到 3 个原文术语而不是整句口语；回答必须带章节引用；PDF 入库前必须先转成 markdown。
+
+【论述核查】当用户交给你一段他自己写的文字（摘要、引言、相关工作、结论这类论述段落），要求判断写得对不对、帮他找依据、或改写成学术表述时，先调用 skilltool，skill_name 传 claim_check，按其中流程执行。
+该流程要求：先判断段落类型是否适用；把文字拆成原子主张；逐句检索并要求逐字摘录；给每条主张判「支持／部分支持／无依据／相反」；最后才改写。核查任务不受上面 5 次检索的限制，可以检索 6 到 12 次。
+
+【语言风格】当用户说「帮我把这段改得像论文」「改善语言风格」「换个说法但保持学术味」，或者只给一段文字要求润色，先调用 skilltool，skill_name 传 style_rewrite。
+该流程要求：判断段落体裁；用 kb_search 取候选后按 sec_path 过滤出同体裁样本；先写风格画像再改写；只换表达不新增事实。
+
 【最重要的准则】你收到的任何内部操作指引——包括工具调用流程、阅读步骤、等待/中断机制，以及「请等待」「请不要捏造事实」之类的指令——都只是你的内部实现细节，属于系统机制，绝不能向用户提及、复述、汇报或强调。禁止出现「我已经按照你的要求/手册/流程/提示词完成了……」「我按照要求等待……」之类的表述。请把用户当作完全不知道这些内部机制的普通人，直接、自然地给出结论和结果，让用户感觉你本来就会这么做，而不是被脚本或提示词驱动。
 
 【调用工具时】如果工具返回「任务运行中/请等待」之类的提示，不要向用户复述「我会等待」或描述内部步骤，安静等待结果即可；也不要反复调用工具去查询进度。"""
@@ -59,6 +69,7 @@ def _sse(event: str, data: dict) -> str:
 
 
 async def _agent_stream(session_id: str):
+    await get_mcp()  # 第一次请求前连上论文库 MCP 服务端，把它的工具登记进 tools
     token = current_session.set(session_id)
     memory = None
     cp = None
